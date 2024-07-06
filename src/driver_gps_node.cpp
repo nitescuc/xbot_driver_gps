@@ -45,6 +45,9 @@ ros::Time last_wheel_tick_time(0.0);
 ros::Time last_vrs_feedback(0.0);
 nmea_msgs::Sentence vrs_msg;
 
+ros::Time last_slam_time(0.0);
+bool has_gps = true;
+
 void generate_nmea(double lat_in, double lon_in) {
     // only send every 10 seconds, this will be more than needed
     if ((ros::Time::now() - last_vrs_feedback).toSec() < 10.0) {
@@ -137,13 +140,22 @@ void convert_gps_result(const GpsInterface::GpsState &state, xbot_msgs::Absolute
     switch (state.rtk_type) {
         case GpsInterface::GpsState::RTK_FLOAT:
             result.flags = xbot_msgs::AbsolutePose::FLAG_GPS_RTK | xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FLOAT;
+            if (has_slam()) {
+                has_gps = false;
+                return;
+            }
             break;
         case GpsInterface::GpsState::RTK_FIX:
             result.flags = xbot_msgs::AbsolutePose::FLAG_GPS_RTK | xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FIXED;
             break;
         default:
+            if (has_slam()) {
+                has_gps = false;
+                return;
+            }
             result.flags = 0;
     }
+    has_gps = true;
 
     if (state.fix_type == GpsInterface::GpsState::FixType::DR_ONLY ||
         state.fix_type == GpsInterface::GpsState::FixType::GNSS_DR_COMBINED) {
@@ -186,9 +198,47 @@ void convert_gps_result(const GpsInterface::GpsState &state, xbot_msgs::Absolute
 
 }
 
+bool has_slam() {
+    return ((ros::Time::now() - last_slam_time).toSec() < 1);
+}
+
+void convert_slam_to_gps_result(geometry_msgs::PoseWithCovarianceStamped &slam_msg, xbot_msgs::AbsolutePose &result) {
+    result.header.seq++;
+    result.header.frame_id = "gps";
+    result.header.stamp = ros::Time::now();
+
+    result.source = xbot_msgs::AbsolutePose::SOURCE_GPS;
+    result.flags = 0;
+    result.sensor_stamp = 0;
+    result.received_stamp = 0;
+    result.flags = xbot_msgs::AbsolutePose::FLAG_GPS_RTK | xbot_msgs::AbsolutePose::FLAG_GPS_RTK_FLOAT;
+
+    result.orientation_valid = true;
+    result.motion_vector_valid = false;
+    result.position_accuracy = slam_msg.pose.covariance[0];
+    result.orientation_accuracy = slam_msg.pose.covariance[35];
+
+    result.pose.pose.position.x = slam_msg.pose.pose.position.x;
+    result.pose.pose.position.y = slam_msg.pose.pose.position.y;
+    result.pose.pose.position.z = slam_msg.pose.pose.position.z;
+    result.pose.pose.orientation = slam_msg.pose.pose.orientation;
+
+    result.pose.covariance = slam_msg.pose.covariance;
+
+    result.motion_vector.x = 0;
+    result.motion_vector.y = 0;
+    result.motion_vector.z = 0;
+
+    //result.vehicle_heading = state.vehicle_heading;
+    //result.motion_heading = state.motion_heading;
+}
+
 void gps_state_received(const GpsInterface::GpsState &state) {
     // new state received, publish
     convert_gps_result(state, pose_result);
+    } else {
+        convert_slam_to_gps_result(last_slam_msg, pose_result);
+    }
     xbot_pose_pub.publish(pose_result);
     pose_pub.publish(pose_result.pose);
 
@@ -220,6 +270,20 @@ imu_received(const GpsInterface::ImuState &state) {
     imu_msg.linear_acceleration.z = state.az;
     imu_pub.publish(imu_msg);
 }
+
+void slam_pose_received(const geometry_msgs::PoseWithCovarianceStamped::ConstPtr &msg) {
+    if (msg->pose.covariance[0] > 1000) {
+        ROS_INFO_STREAM_THROTTLE(60, "slam required but covariance too high");
+        return;
+    }
+    last_slam_time = ros::Time::now();
+    if (has_gps) return;
+    ROS_INFO_STREAM_THROTTLE(10, "Position from SLAM")
+    convert_slam_to_gps_result(last_slam_msg, pose_result);
+    xbot_pose_pub.publish(pose_result);
+    pose_pub.publish(pose_result.pose);
+}
+
 
 int main(int argc, char **argv) {
 
@@ -279,6 +343,7 @@ int main(int argc, char **argv) {
                                                        ros::TransportHints().tcpNoDelay(true));
     ros::Subscriber rtcm_sub = n.subscribe("rtcm", 0, rtcm_received,
                                            ros::TransportHints().tcpNoDelay(true));
+    ros::Subscriber slam_sub = paramNh.subscribe("poseupdate", 10, onSlamPose);
 
 
     vrs_nmea_pub = n.advertise<nmea_msgs::Sentence>("/nmea", 10);
