@@ -173,8 +173,8 @@ void convert_gps_result(const GpsInterface::GpsState &state, xbot_msgs::Absolute
             pow(state.position_accuracy, 2), 0.0, 0.0, 0.0, 0.0, 0.0,
             0.0, pow(state.position_accuracy, 2), 0.0, 0.0, 0.0, 0.0,
             0.0, 0.0, 0.0, pow(state.position_accuracy, 2), 0.0, 0.0,
-            0.0, 0.0, 0.0, 10000.0, 0.0, 0.0,
-            0.0, 0.0, 0.0, 0.0, 10000.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
             0.0, 0.0, 0.0, 0.0, 0.0, pow(headingAcc, 2)
     };
 
