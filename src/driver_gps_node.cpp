@@ -18,10 +18,11 @@
 #include "rtcm_msgs/Message.h"
 #include <nmeaparse/nmea.h>
 #include "GeographicLib/DMS.hpp"
-#include <boost/algorithm/string.hpp>
 #include "nmea_msgs/Sentence.h"
 #include <boost/date_time/posix_time/posix_time.hpp>
 #include <boost/date_time/posix_time/posix_time_io.hpp>
+#include <algorithm>
+#include <cctype>
 
 using namespace xbot::driver::gps;
 using namespace nmea;
@@ -231,13 +232,43 @@ int main(int argc, char **argv) {
     ros::NodeHandle n;
     ros::NodeHandle paramNh("~");
 
-    isUbxInterface = paramNh.param("ubx_mode", true);
-    if(isUbxInterface) {
+
+    std::string protocol;
+    bool has_protocol = paramNh.getParam("protocol", protocol);
+    bool ubx_mode = false;
+    bool has_ubx_mode = paramNh.getParam("ubx_mode", ubx_mode);
+
+    if (!has_protocol && !has_ubx_mode) {
+        ROS_ERROR("Neither 'protocol' nor 'ubx_mode' parameter provided. Set 'protocol' (e.g., 'UBX' or 'NMEA') or legacy 'ubx_mode'. Exiting.");
+        return 1;
+    }
+
+    if (has_protocol && has_ubx_mode) {
+        ROS_WARN("Both 'protocol' and 'ubx_mode' are set. using 'protocol' and ignoring 'ubx_mode'.");
+    }
+
+    std::string chosen_protocol;
+    if (has_protocol) {
+        // Normalize case
+        std::transform(protocol.begin(), protocol.end(), protocol.begin(),
+                       [](unsigned char c){ return static_cast<char>(std::toupper(c)); });
+        chosen_protocol = protocol;
+    } else {
+        // Backward compatibility with legacy ubx_mode
+        chosen_protocol = ubx_mode ? "UBX" : "NMEA";
+        ROS_INFO("Using legacy 'ubx_mode' to select protocol: %s", chosen_protocol.c_str());
+    }
+
+
+    if(chosen_protocol == "UBX") {
         ROS_INFO_STREAM("Using UBX mode for GPS");
         gpsInterface = new UbxGpsInterface();
-    } else {
+    } else if (chosen_protocol == "NMEA") {
         ROS_INFO_STREAM("Using NMEA mode for GPS");
         gpsInterface = new NmeaGpsInterface();
+    } else {
+        ROS_ERROR("Unsupported protocol '%s'. Supported values: 'UBX', 'NMEA'. Exiting.", chosen_protocol.c_str());
+        return 1;
     }
 
     gpsInterface->set_log_function(gps_log);
