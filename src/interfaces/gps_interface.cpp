@@ -48,7 +48,7 @@ namespace xbot {
                 std::unique_lock<std::mutex> lk(tx_mutex_);
                 auto millis = duration_cast<milliseconds>(steady_clock::now() - start).count();
 
-                if (millis > 10) {
+                if (millis > 100) {
                     log("waited " + std::to_string(millis) +
                         " ms to write to the tx buffer, serial port is probably congested!", ERROR);
                 }
